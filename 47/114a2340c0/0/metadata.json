@@ -1,0 +1,26 @@
+{
+  "cli_version": "v0.4.9-dev-e542cbaf",
+  "checkpoint_id": "47114a2340c0",
+  "session_id": "145abcf4-e53e-4236-b98d-ede52312a0c5",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-06T11:42:41.311283Z",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "1.txt"
+  ],
+  "agent": "Roger Roger Agent",
+  "turn_id": "58bc4958322f",
+  "session_metrics": {
+    "turn_count": 3
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-06T11:42:41.293825Z",
+    "agent_lines": 1,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 1,
+    "agent_percentage": 100
+  }
+}

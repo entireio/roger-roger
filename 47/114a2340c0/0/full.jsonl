@@ -1,0 +1,6 @@
+{"type":"user","uuid":"4dca2028-c49f-4eb0-9b33-a989929dbc28","message":{"content":"create file 1.txt"}}
+{"type":"assistant","uuid":"98ae52c2-f44e-4941-8fe0-20e312a1219f","message":{"content":[{"type":"text","text":"Created 1.txt."}]}}
+{"type":"user","uuid":"c967fea4-7f2c-4cd5-a52b-762e830aa5d3","message":{"content":"hi"}}
+{"type":"assistant","uuid":"f73399e8-df01-4489-8917-214eadd2954e","message":{"content":[{"type":"text","text":"roger roger"}]}}
+{"type":"user","uuid":"13d94830-a1b4-4e7d-9f16-151798379c5e","message":{"content":"there"}}
+{"type":"assistant","uuid":"a2ee2f7f-23fe-46e9-a050-bede3871afcb","message":{"content":[{"type":"text","text":"roger roger"}]}}
