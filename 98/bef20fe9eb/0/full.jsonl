@@ -1,0 +1,6 @@
+{"type":"user","timestamp":"2026-03-06T12:27:50+01:00","message":"hi there"}
+{"type":"assistant","timestamp":"2026-03-06T12:27:50+01:00","message":"roger roger"}
+{"type":"user","timestamp":"2026-03-06T12:27:54+01:00","message":"this is test"}
+{"type":"assistant","timestamp":"2026-03-06T12:27:54+01:00","message":"roger roger"}
+{"type":"user","timestamp":"2026-03-06T12:28:03+01:00","message":"create a file roger.txt"}
+{"type":"assistant","timestamp":"2026-03-06T12:28:03+01:00","message":"Created roger.txt."}

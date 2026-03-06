@@ -1,0 +1,18 @@
+{
+  "cli_version": "v0.4.9-dev-e542cbaf",
+  "checkpoint_id": "98bef20fe9eb",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "data/roger.txt"
+  ],
+  "sessions": [
+    {
+      "metadata": "/98/bef20fe9eb/0/metadata.json",
+      "transcript": "/98/bef20fe9eb/0/full.jsonl",
+      "content_hash": "/98/bef20fe9eb/0/content_hash.txt",
+      "prompt": "/98/bef20fe9eb/0/prompt.txt"
+    }
+  ]
+}
