@@ -2,5 +2,8 @@
 go = { version = '1.25.6' }
 
 [tasks.build]
-description = "Build roger-roger"
-run = "go build -o roger-roger ."
+description = "Build both binaries"
+run = [
+  "go build -o roger-roger ./cmd/roger-roger",
+  "go build -o entire-agent-roger-roger ./cmd/entire-agent-roger-roger",
+]
