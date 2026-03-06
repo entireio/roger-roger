@@ -1,0 +1,18 @@
+{
+  "cli_version": "v0.4.9-dev-e542cbaf",
+  "checkpoint_id": "dae0cedd5830",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "data/hello.txt"
+  ],
+  "sessions": [
+    {
+      "metadata": "/da/e0cedd5830/0/metadata.json",
+      "transcript": "/da/e0cedd5830/0/full.jsonl",
+      "content_hash": "/da/e0cedd5830/0/content_hash.txt",
+      "prompt": "/da/e0cedd5830/0/prompt.txt"
+    }
+  ]
+}
