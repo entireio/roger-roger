@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"time"
 )
@@ -52,6 +53,14 @@ func main() {
 		cmdAreHooksInstalled()
 	case "write-hook-response":
 		cmdWriteHookResponse()
+	case "get-transcript-position":
+		cmdGetTranscriptPosition()
+	case "extract-modified-files":
+		cmdExtractModifiedFiles()
+	case "extract-prompts":
+		cmdExtractPrompts()
+	case "extract-summary":
+		cmdExtractSummary()
 	default:
 		fmt.Fprintf(os.Stderr, "unknown subcommand: %s\n", os.Args[1])
 		os.Exit(1)
@@ -100,6 +109,12 @@ type agentSessionJSON struct {
 	DelFiles   []string `json:"deleted_files"`
 }
 
+type transcriptEntry struct {
+	Type      string `json:"type"`
+	Timestamp string `json:"timestamp"`
+	Message   string `json:"message"`
+}
+
 type eventJSON struct {
 	Type       int    `json:"type"`
 	SessionID  string `json:"session_id"`
@@ -128,6 +143,7 @@ func cmdInfo() {
 		Capabilities: declaredCaps{
 			Hooks:              true,
 			HookResponseWriter: true,
+			TranscriptAnalyzer: true,
 		},
 	})
 }
@@ -286,6 +302,115 @@ func cmdAreHooksInstalled() {
 
 func cmdWriteHookResponse() {
 	fmt.Fprintln(os.Stdout, getFlag("--message"))
+}
+
+// --- TranscriptAnalyzer subcommands ---
+
+func cmdGetTranscriptPosition() {
+	path := getFlag("--path")
+	lines := readTranscriptLines(path)
+	writeJSON(map[string]int{"position": len(lines)})
+}
+
+func cmdExtractModifiedFiles() {
+	path := getFlag("--path")
+	offset, err := strconv.Atoi(getFlag("--offset"))
+	if err != nil {
+		fatal("invalid --offset: %v", err)
+	}
+
+	lines := readTranscriptLines(path)
+	var files []string
+	seen := map[string]bool{}
+
+	for i := offset; i < len(lines); i++ {
+		var entry transcriptEntry
+		if err := json.Unmarshal(lines[i], &entry); err != nil {
+			continue
+		}
+		if entry.Type != "assistant" {
+			continue
+		}
+		if m := createdFileRe.FindStringSubmatch(entry.Message); m != nil {
+			f := m[1]
+			if !seen[f] {
+				seen[f] = true
+				files = append(files, f)
+			}
+		}
+	}
+
+	writeJSON(map[string]any{
+		"files":            files,
+		"current_position": len(lines),
+	})
+}
+
+func cmdExtractPrompts() {
+	sessionRef := getFlag("--session-ref")
+	offset, err := strconv.Atoi(getFlag("--offset"))
+	if err != nil {
+		fatal("invalid --offset: %v", err)
+	}
+
+	lines := readTranscriptLines(sessionRef)
+	var prompts []string
+
+	for i := offset; i < len(lines); i++ {
+		var entry transcriptEntry
+		if err := json.Unmarshal(lines[i], &entry); err != nil {
+			continue
+		}
+		if entry.Type == "user" {
+			prompts = append(prompts, entry.Message)
+		}
+	}
+
+	writeJSON(map[string][]string{"prompts": prompts})
+}
+
+func cmdExtractSummary() {
+	sessionRef := getFlag("--session-ref")
+	lines := readTranscriptLines(sessionRef)
+
+	var prompts []string
+	for _, line := range lines {
+		var entry transcriptEntry
+		if err := json.Unmarshal(line, &entry); err != nil {
+			continue
+		}
+		if entry.Type == "user" {
+			prompts = append(prompts, entry.Message)
+		}
+	}
+
+	if len(prompts) == 0 {
+		writeJSON(map[string]any{"summary": "", "has_summary": false})
+		return
+	}
+
+	summary := prompts[0]
+	if len(summary) > 100 {
+		summary = summary[:100] + "..."
+	}
+	writeJSON(map[string]any{"summary": summary, "has_summary": true})
+}
+
+var createdFileRe = regexp.MustCompile(`^Created ([^\s]+)\.$`)
+
+// readTranscriptLines reads a JSONL file and returns non-empty lines.
+func readTranscriptLines(path string) [][]byte {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var lines [][]byte
+	for _, line := range bytes.Split(data, []byte("\n")) {
+		if len(bytes.TrimSpace(line)) > 0 {
+			lines = append(lines, line)
+		}
+	}
+	return lines
 }
 
 // --- Helpers ---
