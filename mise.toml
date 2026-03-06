@@ -1,0 +1,6 @@
+[tools]
+go = { version = '1.25.6' }
+
+[tasks.build]
+description = "Build roger-roger"
+run = "go build -o roger-roger ."
