@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"strconv"
 	"time"
 )
@@ -109,10 +110,24 @@ type agentSessionJSON struct {
 	DelFiles   []string `json:"deleted_files"`
 }
 
-type transcriptEntry struct {
-	Type      string `json:"type"`
-	Timestamp string `json:"timestamp"`
-	Message   string `json:"message"`
+// transcriptLine matches the standard JSONL transcript format (Claude Code / Cursor).
+type transcriptLine struct {
+	Type    string          `json:"type"`
+	UUID    string          `json:"uuid"`
+	Message json.RawMessage `json:"message"`
+}
+
+type userMessage struct {
+	Content string `json:"content"`
+}
+
+type assistantMessage struct {
+	Content []contentBlock `json:"content"`
+}
+
+type contentBlock struct {
+	Type string `json:"type"`
+	Text string `json:"text,omitempty"`
 }
 
 type eventJSON struct {
@@ -324,14 +339,15 @@ func cmdExtractModifiedFiles() {
 	seen := map[string]bool{}
 
 	for i := offset; i < len(lines); i++ {
-		var entry transcriptEntry
-		if err := json.Unmarshal(lines[i], &entry); err != nil {
+		var line transcriptLine
+		if err := json.Unmarshal(lines[i], &line); err != nil {
 			continue
 		}
-		if entry.Type != "assistant" {
+		if line.Type != "assistant" {
 			continue
 		}
-		if m := createdFileRe.FindStringSubmatch(entry.Message); m != nil {
+		text := extractAssistantText(line.Message)
+		if m := createdFileRe.FindStringSubmatch(text); m != nil {
 			f := m[1]
 			if !seen[f] {
 				seen[f] = true
@@ -357,12 +373,15 @@ func cmdExtractPrompts() {
 	var prompts []string
 
 	for i := offset; i < len(lines); i++ {
-		var entry transcriptEntry
-		if err := json.Unmarshal(lines[i], &entry); err != nil {
+		var line transcriptLine
+		if err := json.Unmarshal(lines[i], &line); err != nil {
 			continue
 		}
-		if entry.Type == "user" {
-			prompts = append(prompts, entry.Message)
+		if line.Type == "user" {
+			text := extractUserText(line.Message)
+			if text != "" {
+				prompts = append(prompts, text)
+			}
 		}
 	}
 
@@ -374,13 +393,16 @@ func cmdExtractSummary() {
 	lines := readTranscriptLines(sessionRef)
 
 	var prompts []string
-	for _, line := range lines {
-		var entry transcriptEntry
-		if err := json.Unmarshal(line, &entry); err != nil {
+	for _, raw := range lines {
+		var line transcriptLine
+		if err := json.Unmarshal(raw, &line); err != nil {
 			continue
 		}
-		if entry.Type == "user" {
-			prompts = append(prompts, entry.Message)
+		if line.Type == "user" {
+			text := extractUserText(line.Message)
+			if text != "" {
+				prompts = append(prompts, text)
+			}
 		}
 	}
 
@@ -397,6 +419,30 @@ func cmdExtractSummary() {
 }
 
 var createdFileRe = regexp.MustCompile(`^Created ([^\s]+)\.$`)
+
+// extractUserText extracts the text content from a user message.
+func extractUserText(raw json.RawMessage) string {
+	var msg userMessage
+	if err := json.Unmarshal(raw, &msg); err != nil {
+		return ""
+	}
+	return msg.Content
+}
+
+// extractAssistantText extracts concatenated text from an assistant message's content blocks.
+func extractAssistantText(raw json.RawMessage) string {
+	var msg assistantMessage
+	if err := json.Unmarshal(raw, &msg); err != nil {
+		return ""
+	}
+	var texts []string
+	for _, block := range msg.Content {
+		if block.Type == "text" && block.Text != "" {
+			texts = append(texts, block.Text)
+		}
+	}
+	return strings.Join(texts, "\n")
+}
 
 // readTranscriptLines reads a JSONL file and returns non-empty lines.
 func readTranscriptLines(path string) [][]byte {

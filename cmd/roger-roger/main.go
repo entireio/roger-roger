@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 )
@@ -106,10 +105,25 @@ func fireHook(dir, hookName string, payload any) {
 
 // --- Transcript ---
 
-type transcriptEntry struct {
-	Type      string `json:"type"`
-	Timestamp string `json:"timestamp"`
-	Message   string `json:"message"`
+// transcriptLine matches the standard JSONL transcript format used by Claude Code / Cursor.
+// The "message" field is a raw JSON object whose structure depends on the "type".
+type transcriptLine struct {
+	Type    string          `json:"type"`
+	UUID    string          `json:"uuid"`
+	Message json.RawMessage `json:"message"`
+}
+
+type userMessage struct {
+	Content string `json:"content"`
+}
+
+type assistantMessage struct {
+	Content []contentBlock `json:"content"`
+}
+
+type contentBlock struct {
+	Type string `json:"type"`
+	Text string `json:"text,omitempty"`
 }
 
 func setupTranscript(sessionID string) string {
@@ -129,10 +143,20 @@ func setupTranscript(sessionID string) string {
 }
 
 func appendTranscript(path, role, content string) {
-	entry := transcriptEntry{
-		Type:      role,
-		Timestamp: time.Now().Format(time.RFC3339),
-		Message:   content,
+	var msg json.RawMessage
+	switch role {
+	case "user":
+		msg, _ = json.Marshal(userMessage{Content: content})
+	case "assistant":
+		msg, _ = json.Marshal(assistantMessage{
+			Content: []contentBlock{{Type: "text", Text: content}},
+		})
+	}
+
+	entry := transcriptLine{
+		Type:    role,
+		UUID:    uuid.New().String(),
+		Message: msg,
 	}
 	data, _ := json.Marshal(entry)
 	data = append(data, '\n')
