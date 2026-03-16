@@ -1,4 +1,4 @@
-module github.com/nodo/roger-roger
+module github.com/entireio/roger-roger
 
 go 1.25.0
 
