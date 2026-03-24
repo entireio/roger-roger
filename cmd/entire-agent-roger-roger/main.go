@@ -8,8 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strings"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -96,6 +96,15 @@ type hookInputJSON struct {
 	SessionRef string `json:"session_ref"`
 	Timestamp  string `json:"timestamp"`
 	UserPrompt string `json:"user_prompt,omitempty"`
+}
+
+type parsedHookInput struct {
+	SessionID      string `json:"session_id"`
+	SessionRef     string `json:"session_ref"`
+	TranscriptPath string `json:"transcript_path"`
+	Timestamp      string `json:"timestamp"`
+	UserPrompt     string `json:"user_prompt,omitempty"`
+	Prompt         string `json:"prompt,omitempty"`
 }
 
 type agentSessionJSON struct {
@@ -197,15 +206,26 @@ func cmdResolveSessionFile() {
 func cmdReadSession() {
 	var input hookInputJSON
 	readJSONStdin(&input)
-	resp := agentSessionJSON{
-		SessionID:  input.SessionID,
-		AgentName:  agentName,
-		SessionRef: input.SessionRef,
-		StartTime:  time.Now().Format(time.RFC3339),
-	}
+	resp := defaultSession(input)
 	if input.SessionRef != "" {
 		data, err := os.ReadFile(input.SessionRef)
 		if err == nil {
+			if stored, ok := decodeStoredSession(data); ok {
+				if stored.SessionID == "" {
+					stored.SessionID = input.SessionID
+				}
+				if stored.SessionRef == "" {
+					stored.SessionRef = input.SessionRef
+				}
+				if stored.AgentName == "" {
+					stored.AgentName = agentName
+				}
+				if stored.StartTime == "" {
+					stored.StartTime = time.Now().Format(time.RFC3339)
+				}
+				writeJSON(stored)
+				return
+			}
 			resp.NativeData = data
 		}
 	}
@@ -221,7 +241,11 @@ func cmdWriteSession() {
 	if err := os.MkdirAll(filepath.Dir(session.SessionRef), 0o750); err != nil {
 		fatal("create session dir: %v", err)
 	}
-	if err := os.WriteFile(session.SessionRef, session.NativeData, 0o600); err != nil {
+	data, err := json.Marshal(session)
+	if err != nil {
+		fatal("marshal session: %v", err)
+	}
+	if err := os.WriteFile(session.SessionRef, data, 0o600); err != nil {
 		fatal("write session: %v", err)
 	}
 }
@@ -244,7 +268,11 @@ func cmdChunkTranscript() {
 	if err != nil {
 		fatal("read stdin: %v", err)
 	}
-	writeJSON(map[string][][]byte{"chunks": chunkJSONL(data, maxSize)})
+	chunks, err := chunkJSONL(data, maxSize)
+	if err != nil {
+		fatal("invalid --max-size: %v", err)
+	}
+	writeJSON(map[string][][]byte{"chunks": chunks})
 }
 
 func cmdReassembleTranscript() {
@@ -273,16 +301,24 @@ func cmdParseHook() {
 		fatal("read stdin: %v", err)
 	}
 
-	var raw struct {
-		SessionID      string `json:"session_id"`
-		TranscriptPath string `json:"transcript_path"`
-		Prompt         string `json:"prompt"`
-	}
-	if err := json.Unmarshal(data, &raw); err != nil {
+	raw, err := parseHookInput(data)
+	if err != nil {
 		fatal("parse hook input: %v", err)
 	}
+	if raw == nil {
+		fmt.Fprint(os.Stdout, "null")
+		return
+	}
 
-	ts := time.Now().Format(time.RFC3339)
+	event := buildHookEvent(hookName, *raw)
+	if event == nil {
+		fmt.Fprint(os.Stdout, "null")
+		return
+	}
+	writeJSON(event)
+}
+
+func buildHookEvent(hookName string, raw parsedHookInput) *eventJSON {
 	var eventType int
 	switch hookName {
 	case "session-start":
@@ -294,17 +330,29 @@ func cmdParseHook() {
 	case "session-end":
 		eventType = eventSessionEnd
 	default:
-		fmt.Fprint(os.Stdout, "null")
-		return
+		return nil
 	}
 
-	writeJSON(eventJSON{
+	sessionRef := raw.SessionRef
+	if sessionRef == "" {
+		sessionRef = raw.TranscriptPath
+	}
+	prompt := raw.UserPrompt
+	if prompt == "" {
+		prompt = raw.Prompt
+	}
+	timestamp := raw.Timestamp
+	if timestamp == "" {
+		timestamp = time.Now().Format(time.RFC3339)
+	}
+
+	return &eventJSON{
 		Type:       eventType,
 		SessionID:  raw.SessionID,
-		SessionRef: raw.TranscriptPath,
-		Prompt:     raw.Prompt,
-		Timestamp:  ts,
-	})
+		SessionRef: sessionRef,
+		Prompt:     prompt,
+		Timestamp:  timestamp,
+	}
 }
 
 func cmdInstallHooks() {
@@ -492,12 +540,54 @@ func readJSONStdin(v any) {
 	}
 }
 
-func chunkJSONL(data []byte, maxSize int) [][]byte {
-	if len(data) == 0 {
-		return nil
+func defaultSession(input hookInputJSON) agentSessionJSON {
+	return agentSessionJSON{
+		SessionID:  input.SessionID,
+		AgentName:  agentName,
+		SessionRef: input.SessionRef,
+		StartTime:  time.Now().Format(time.RFC3339),
 	}
-	if maxSize <= 0 || len(data) <= maxSize {
-		return [][]byte{data}
+}
+
+func decodeStoredSession(data []byte) (agentSessionJSON, bool) {
+	var session agentSessionJSON
+	if err := json.Unmarshal(data, &session); err != nil {
+		return agentSessionJSON{}, false
+	}
+	if session.SessionID == "" &&
+		session.AgentName == "" &&
+		session.RepoPath == "" &&
+		session.SessionRef == "" &&
+		session.StartTime == "" &&
+		len(session.NativeData) == 0 &&
+		len(session.ModFiles) == 0 &&
+		len(session.NewFiles) == 0 &&
+		len(session.DelFiles) == 0 {
+		return agentSessionJSON{}, false
+	}
+	return session, true
+}
+
+func parseHookInput(data []byte) (*parsedHookInput, error) {
+	if len(bytes.TrimSpace(data)) == 0 {
+		return nil, nil
+	}
+	var raw parsedHookInput
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, err
+	}
+	return &raw, nil
+}
+
+func chunkJSONL(data []byte, maxSize int) ([][]byte, error) {
+	if maxSize <= 0 {
+		return nil, fmt.Errorf("must be greater than 0")
+	}
+	if len(data) == 0 {
+		return nil, nil
+	}
+	if len(data) <= maxSize {
+		return [][]byte{data}, nil
 	}
 	var chunks [][]byte
 	var current []byte
@@ -515,7 +605,7 @@ func chunkJSONL(data []byte, maxSize int) [][]byte {
 	if len(current) > 0 {
 		chunks = append(chunks, current)
 	}
-	return chunks
+	return chunks, nil
 }
 
 func fatal(format string, args ...any) {
