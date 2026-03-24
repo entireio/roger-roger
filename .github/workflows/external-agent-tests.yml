@@ -1,0 +1,41 @@
+name: External Agent Protocol Tests
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: '1.25.6'
+
+jobs:
+  protocol-compliance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Build external agent binary
+        shell: bash
+        run: |
+          mkdir -p bin
+          go build -o bin/entire-agent-roger-roger ./cmd/entire-agent-roger-roger
+
+      - name: Run external agent protocol compliance tests
+        uses: entireio/external-agents-tests@main
+        with:
+          binary-path: bin/entire-agent-roger-roger
+          go-version: ${{ env.GO_VERSION }}
