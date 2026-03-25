@@ -49,7 +49,7 @@ func main() {
 	case "install-hooks":
 		cmdInstallHooks()
 	case "uninstall-hooks":
-		// no-op
+		cmdUninstallHooks()
 	case "are-hooks-installed":
 		cmdAreHooksInstalled()
 	case "write-hook-response":
@@ -356,11 +356,77 @@ func buildHookEvent(hookName string, raw parsedHookInput) *eventJSON {
 }
 
 func cmdInstallHooks() {
-	writeJSON(map[string]int{"hooks_installed": 0})
+	root := repoRoot()
+	force := hasFlag("--force")
+	hooksDir := filepath.Join(root, ".roger-roger", "hooks")
+
+	if !force && allHooksInstalled(hooksDir) {
+		writeJSON(map[string]int{"hooks_installed": 0})
+		return
+	}
+
+	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
+		fatal("create hooks dir: %v", err)
+	}
+
+	hookNames := []string{"session-start", "session-end", "stop", "user-prompt-submit"}
+	installed := 0
+	for _, name := range hookNames {
+		p := filepath.Join(hooksDir, name+".json")
+		if !force {
+			if _, err := os.Stat(p); err == nil {
+				continue
+			}
+		}
+		data, _ := json.Marshal(map[string]string{"hook": name, "agent": agentName})
+		if err := os.WriteFile(p, data, 0o644); err != nil {
+			fatal("write hook %s: %v", name, err)
+		}
+		installed++
+	}
+
+	writeJSON(map[string]int{"hooks_installed": installed})
+}
+
+func cmdUninstallHooks() {
+	root := repoRoot()
+	hooksDir := filepath.Join(root, ".roger-roger", "hooks")
+	os.RemoveAll(hooksDir)
 }
 
 func cmdAreHooksInstalled() {
-	writeJSON(map[string]bool{"installed": false})
+	root := repoRoot()
+	hooksDir := filepath.Join(root, ".roger-roger", "hooks")
+	writeJSON(map[string]bool{"installed": allHooksInstalled(hooksDir)})
+}
+
+func allHooksInstalled(hooksDir string) bool {
+	for _, name := range []string{"session-start", "session-end", "stop", "user-prompt-submit"} {
+		if _, err := os.Stat(filepath.Join(hooksDir, name+".json")); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
+func repoRoot() string {
+	if r := os.Getenv("ENTIRE_REPO_ROOT"); r != "" {
+		return r
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		fatal("getwd: %v", err)
+	}
+	return wd
+}
+
+func hasFlag(name string) bool {
+	for _, arg := range os.Args[1:] {
+		if arg == name {
+			return true
+		}
+	}
+	return false
 }
 
 func cmdWriteHookResponse() {
