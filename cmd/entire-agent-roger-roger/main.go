@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -42,6 +43,8 @@ func main() {
 		cmdChunkTranscript()
 	case "reassemble-transcript":
 		cmdReassembleTranscript()
+	case "compact-transcript":
+		cmdCompactTranscript()
 	case "format-resume-command":
 		cmdFormatResumeCommand()
 	case "parse-hook":
@@ -84,6 +87,7 @@ type infoResponse struct {
 type declaredCaps struct {
 	Hooks              bool `json:"hooks"`
 	TranscriptAnalyzer bool `json:"transcript_analyzer"`
+	CompactTranscript  bool `json:"compact_transcript"`
 	TranscriptPreparer bool `json:"transcript_preparer"`
 	TokenCalculator    bool `json:"token_calculator"`
 	TextGenerator      bool `json:"text_generator"`
@@ -121,9 +125,10 @@ type agentSessionJSON struct {
 
 // transcriptLine matches the standard JSONL transcript format (Claude Code / Cursor).
 type transcriptLine struct {
-	Type    string          `json:"type"`
-	UUID    string          `json:"uuid"`
-	Message json.RawMessage `json:"message"`
+	Type      string          `json:"type"`
+	UUID      string          `json:"uuid"`
+	Timestamp string          `json:"timestamp,omitempty"`
+	Message   json.RawMessage `json:"message"`
 }
 
 type userMessage struct {
@@ -167,6 +172,7 @@ func cmdInfo() {
 		Capabilities: declaredCaps{
 			Hooks:              true,
 			HookResponseWriter: true,
+			CompactTranscript:  true,
 			TranscriptAnalyzer: true,
 		},
 	})
@@ -285,6 +291,28 @@ func cmdReassembleTranscript() {
 		result = append(result, chunk...)
 	}
 	os.Stdout.Write(result)
+}
+
+func cmdCompactTranscript() {
+	sessionRef := getFlag("--session-ref")
+	data, err := os.ReadFile(sessionRef)
+	if err != nil {
+		fatal("read transcript: %v", err)
+	}
+
+	cliVersion := os.Getenv("ENTIRE_CLI_VERSION")
+	if cliVersion == "" {
+		cliVersion = "unknown"
+	}
+
+	compact, err := buildCompactTranscript(data, agentName, cliVersion)
+	if err != nil {
+		fatal("build compact transcript: %v", err)
+	}
+
+	writeJSON(map[string]string{
+		"transcript": encodeBase64(compact),
+	})
 }
 
 func cmdFormatResumeCommand() {
@@ -672,6 +700,108 @@ func chunkJSONL(data []byte, maxSize int) ([][]byte, error) {
 		chunks = append(chunks, current)
 	}
 	return chunks, nil
+}
+
+type compactUserBlock struct {
+	Text string `json:"text"`
+}
+
+type compactAssistantBlock struct {
+	Type string `json:"type"`
+	Text string `json:"text,omitempty"`
+}
+
+type compactTranscriptEntry struct {
+	Version    int    `json:"v"`
+	Agent      string `json:"agent"`
+	CLIVersion string `json:"cli_version"`
+	Type       string `json:"type"`
+	Timestamp  string `json:"ts,omitempty"`
+	ID         string `json:"id,omitempty"`
+	Content    any    `json:"content"`
+}
+
+func buildCompactTranscript(data []byte, agent, cliVersion string) ([]byte, error) {
+	lines := bytes.Split(data, []byte("\n"))
+	out := make([]byte, 0, len(data))
+
+	for _, rawLine := range lines {
+		if len(bytes.TrimSpace(rawLine)) == 0 {
+			continue
+		}
+
+		var raw transcriptLine
+		if err := json.Unmarshal(rawLine, &raw); err != nil {
+			return nil, fmt.Errorf("parse line: %w", err)
+		}
+
+		entry := compactTranscriptEntry{
+			Version:    1,
+			Agent:      agent,
+			CLIVersion: cliVersion,
+			Type:       raw.Type,
+			Timestamp:  raw.Timestamp,
+		}
+
+		switch raw.Type {
+		case "user":
+			text := extractUserText(raw.Message)
+			if text == "" {
+				return nil, fmt.Errorf("user line missing content")
+			}
+			entry.Content = []compactUserBlock{{Text: text}}
+		case "assistant":
+			content, err := extractCompactAssistantContent(raw.Message)
+			if err != nil {
+				return nil, err
+			}
+			entry.ID = raw.UUID
+			entry.Content = content
+		default:
+			continue
+		}
+
+		encoded, err := json.Marshal(entry)
+		if err != nil {
+			return nil, fmt.Errorf("marshal compact line: %w", err)
+		}
+		out = append(out, encoded...)
+		out = append(out, '\n')
+	}
+
+	if len(bytes.TrimSpace(out)) == 0 {
+		return nil, fmt.Errorf("transcript contained no supported entries")
+	}
+
+	return out, nil
+}
+
+func extractCompactAssistantContent(raw json.RawMessage) ([]compactAssistantBlock, error) {
+	var msg assistantMessage
+	if err := json.Unmarshal(raw, &msg); err != nil {
+		return nil, fmt.Errorf("parse assistant message: %w", err)
+	}
+
+	blocks := make([]compactAssistantBlock, 0, len(msg.Content))
+	for _, block := range msg.Content {
+		if block.Type != "text" || block.Text == "" {
+			continue
+		}
+		blocks = append(blocks, compactAssistantBlock{
+			Type: "text",
+			Text: block.Text,
+		})
+	}
+
+	if len(blocks) == 0 {
+		return nil, fmt.Errorf("assistant line missing text content")
+	}
+
+	return blocks, nil
+}
+
+func encodeBase64(data []byte) string {
+	return base64.StdEncoding.EncodeToString(data)
 }
 
 func fatal(format string, args ...any) {

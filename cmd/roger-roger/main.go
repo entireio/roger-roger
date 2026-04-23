@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -108,9 +109,10 @@ func fireHook(dir, hookName string, payload any) {
 // transcriptLine matches the standard JSONL transcript format used by Claude Code / Cursor.
 // The "message" field is a raw JSON object whose structure depends on the "type".
 type transcriptLine struct {
-	Type    string          `json:"type"`
-	UUID    string          `json:"uuid"`
-	Message json.RawMessage `json:"message"`
+	Type      string          `json:"type"`
+	UUID      string          `json:"uuid"`
+	Timestamp string          `json:"timestamp"`
+	Message   json.RawMessage `json:"message"`
 }
 
 type userMessage struct {
@@ -154,9 +156,10 @@ func appendTranscript(path, role, content string) {
 	}
 
 	entry := transcriptLine{
-		Type:    role,
-		UUID:    uuid.New().String(),
-		Message: msg,
+		Type:      role,
+		UUID:      uuid.New().String(),
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		Message:   msg,
 	}
 	data, _ := json.Marshal(entry)
 	data = append(data, '\n')
