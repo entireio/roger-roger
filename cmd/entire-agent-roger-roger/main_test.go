@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"reflect"
 	"testing"
@@ -104,5 +106,46 @@ func TestBuildHookEventSupportsLegacyFieldNames(t *testing.T) {
 func TestChunkJSONLRejectsNonPositiveMaxSize(t *testing.T) {
 	if _, err := chunkJSONL([]byte("test"), 0); err == nil {
 		t.Fatal("chunkJSONL should reject maxSize <= 0")
+	}
+}
+
+func TestBuildCompactTranscriptConvertsNativeTranscript(t *testing.T) {
+	raw := []byte(
+		`{"type":"user","uuid":"user-1","timestamp":"2026-04-23T18:00:00Z","message":{"content":"Fix the login bug"}}` + "\n" +
+			`{"type":"assistant","uuid":"assistant-1","timestamp":"2026-04-23T18:00:02Z","message":{"content":[{"type":"text","text":"I updated the file."}]}}` + "\n",
+	)
+
+	got, err := buildCompactTranscript(raw, agentName, "0.42.0")
+	if err != nil {
+		t.Fatalf("buildCompactTranscript returned error: %v", err)
+	}
+
+	want := []byte(
+		`{"v":1,"agent":"roger-roger","cli_version":"0.42.0","type":"user","ts":"2026-04-23T18:00:00Z","content":[{"text":"Fix the login bug"}]}` + "\n" +
+			`{"v":1,"agent":"roger-roger","cli_version":"0.42.0","type":"assistant","ts":"2026-04-23T18:00:02Z","id":"assistant-1","content":[{"type":"text","text":"I updated the file."}]}` + "\n",
+	)
+
+	if !bytes.Equal(got, want) {
+		t.Fatalf("compact transcript mismatch:\n got: %s\nwant: %s", got, want)
+	}
+}
+
+func TestBuildCompactTranscriptRejectsAssistantWithoutText(t *testing.T) {
+	raw := []byte(`{"type":"assistant","uuid":"assistant-1","message":{"content":[]}}` + "\n")
+
+	if _, err := buildCompactTranscript(raw, agentName, "0.42.0"); err == nil {
+		t.Fatal("buildCompactTranscript should reject assistant messages without text blocks")
+	}
+}
+
+func TestEncodeBase64UsesStdEncoding(t *testing.T) {
+	data := []byte("hello\n")
+	got := encodeBase64(data)
+	decoded, err := base64.StdEncoding.DecodeString(got)
+	if err != nil {
+		t.Fatalf("decode base64: %v", err)
+	}
+	if !bytes.Equal(decoded, data) {
+		t.Fatalf("decoded payload mismatch: got %q want %q", decoded, data)
 	}
 }
